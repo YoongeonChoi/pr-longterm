@@ -6,10 +6,18 @@ from agent.context_manager import ContextManager
 from agent.llm import HeuristicLLM, LLMProtocol
 from compression.long_context import LongContextCompressor
 from compression.strategies import ContextCompressor
+from context.context_builder import ContextBuilder
+from context.context_ranker import ContextRanker
+from context.token_budget import TokenBudget
+from memory.archival_memory import ArchivalMemory
+from memory.episodic_memory import EpisodicMemory
 from memory.hierarchy import HierarchicalMemoryRuntime
 from memory.ingestion import DocumentIngestor, IngestionResult
 from memory.manager import MemoryManager
+from memory.memory_consolidation import MemoryConsolidation
+from memory.semantic_memory import SemanticMemory
 from memory.store import MemoryRecord, MemoryStore
+from memory.working_memory import WorkingMemory
 from retrieval.embedding import SimpleEmbeddingModel
 from retrieval.hybrid import HybridRetriever
 from retrieval.query_rewrite import QueryRewriter
@@ -47,6 +55,20 @@ class CognitiveMemoryAgent:
             retriever=self.retriever,
             compressor=ContextCompressor(),
         )
+        self.context_builder = ContextBuilder(
+            retriever=self.retriever,
+            ranker=ContextRanker(),
+            compressor=ContextCompressor(),
+        )
+        self.token_budget = TokenBudget(max_tokens=token_budget, reserved_response_tokens=300, reserved_system_tokens=80)
+
+        # Explicit memory-layer components for portfolio readability.
+        self.working_memory = WorkingMemory()
+        self.episodic_memory = EpisodicMemory(self.store)
+        self.semantic_memory = SemanticMemory(store=self.store, embedding_model=self.embedding_model)
+        self.archival_memory = ArchivalMemory(self.store)
+        self.consolidation = MemoryConsolidation(store=self.store, manager=self.memory_manager)
+
         self.hierarchy = HierarchicalMemoryRuntime(memory_manager=self.memory_manager, retriever=self.retriever)
         self.ingestor = DocumentIngestor(store=self.store, embedding_model=self.embedding_model)
         self.long_context = LongContextCompressor()
@@ -72,15 +94,17 @@ class CognitiveMemoryAgent:
 
     def chat(self, session_id: str, user_input: str) -> ChatResult:
         history = self._conversation_by_session.setdefault(session_id, [])
-        context = self.context_manager.build_context(
+        self.working_memory.set(session_id, "active_query", user_input)
+        built = self.context_builder.build(
             query=user_input,
             conversation=history[-20:],
-            retrieval_limit=8,
+            retrieval_limit=12,
+            budget=self.token_budget,
         )
         prompt = (
             f"Session: {session_id}\n"
             f"User Input: {user_input}\n"
-            f"{context.prompt}"
+            f"{built.prompt}"
         )
         response = self.llm.generate(prompt)
         self.hierarchy.write_turn(session_id=session_id, user_input=user_input, agent_output=response)
@@ -89,18 +113,19 @@ class CognitiveMemoryAgent:
         turn_count = len(history) // 2
         if turn_count % 20 == 0:
             self.hierarchy.consolidate_session(session_id=session_id, max_events=120, chunk_size=10)
+            self.consolidation.run_full_consolidation()
 
         observations = [
             f"session_id={session_id}",
-            f"context_tokens={context.total_tokens}",
-            f"compressed={context.was_compressed}",
+            f"context_tokens={built.total_tokens}",
+            f"compressed={built.was_compressed}",
             f"turn_count={turn_count}",
         ]
         return ChatResult(
             session_id=session_id,
             response=response,
-            context_tokens=context.total_tokens,
-            was_compressed=context.was_compressed,
+            context_tokens=built.total_tokens,
+            was_compressed=built.was_compressed,
             observations=observations,
         )
 
@@ -121,4 +146,3 @@ class CognitiveMemoryAgent:
 
     def get_session_history(self, session_id: str, limit: int = 50) -> list[MemoryRecord]:
         return self.memory_manager.read_session_history(session_id=session_id, limit=limit)
-

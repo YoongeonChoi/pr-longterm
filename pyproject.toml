@@ -24,6 +24,7 @@ dev = [
 [tool.setuptools]
 packages = [
   "agent",
+  "context",
   "memory",
   "retrieval",
   "compression",
@@ -36,4 +37,3 @@ packages = [
 minversion = "8.0"
 addopts = "--cov=agent --cov=memory --cov=retrieval --cov=compression --cov=evaluation --cov=api --cov-report=term-missing --cov-fail-under=80"
 testpaths = ["tests"]
-

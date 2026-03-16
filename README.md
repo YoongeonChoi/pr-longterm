@@ -1,86 +1,121 @@
 # Cognitive Memory Engine for LLM Agents
 
-MemGPT-inspired hierarchical memory system for long-context reasoning, multi-session conversations, and autonomous memory management.
+This project implements a memory-augmented LLM system inspired by MemGPT to overcome context window limitations through hierarchical memory management.
 
-## Implemented End-to-End Scope
+## 1. Problem
 
-- Working / Episodic / Semantic / Archival-oriented memory flow
-- Persistent memory store (SQLite) with required schema tables
-- Hybrid retrieval: vector + keyword + recency + importance + graph boost
-- Query rewriting (`RAG`, `LLM` short-form expansion)
-- Context budget manager with recursive long-context compression
-- Document ingestion and chunked semantic memory indexing
-- Cognitive agent with multi-session memory continuity
-- FastAPI endpoints for memory, ingest, chat, consolidation, benchmark
-- Evaluation harness for:
-  - long document QA
-  - long conversation memory
-  - knowledge recall
+Large language models fail when the required context exceeds prompt limits. This causes:
 
-## Architecture
+- loss of long-term conversation continuity
+- weak recall of old but important facts
+- degraded long-document reasoning quality
 
-```text
-User
-  -> Agent Controller / Cognitive Agent
-  -> Context Manager
-  -> Memory Manager
-  -> Hybrid Retriever
-  -> LLM
-```
+The goal of this project is to provide a production-oriented memory architecture that externalizes memory while preserving coherent reasoning.
 
-Memory layers:
+## 2. Research Background
 
-1. Working memory (session runtime state)
-2. Episodic memory (turn-by-turn interaction traces)
-3. Semantic memory (fact/document chunks and extracted knowledge)
-4. Archival memory (summaries/consolidated records)
+The design follows principles from MemGPT-style systems:
 
-## Repository Structure
+- explicit memory tiers instead of one flat vector store
+- agent-managed memory lifecycle (write, summarize, merge, prune)
+- context selection using relevance, recency, and importance
+
+Core equation used in this implementation:
 
 ```text
-agent/
-api/
-compression/
-docs/
-evaluation/
-experiments/
-memory/
-retrieval/
-tests/
+score = 0.5 * relevance + 0.3 * recency + 0.2 * importance
 ```
 
-## Setup
+## 3. Architecture
+
+### Architecture Diagram
+
+```mermaid
+flowchart TD
+    U["User"] --> A["Cognitive Agent / Agent Controller"]
+    A --> CB["Context Builder"]
+    CB --> MM["Memory Manager"]
+    MM --> R["Hybrid Retriever"]
+    R --> L["LLM"]
+    MM --> WM["Working Memory"]
+    MM --> EM["Episodic Memory"]
+    MM --> SM["Semantic Memory"]
+    MM --> AM["Archival Memory"]
+```
+
+### Memory Modules
+
+- `memory/working_memory.py`
+- `memory/episodic_memory.py`
+- `memory/semantic_memory.py`
+- `memory/archival_memory.py`
+- `memory/memory_consolidation.py`
+
+### Context Modules
+
+- `context/context_builder.py`
+- `context/context_ranker.py`
+- `context/token_budget.py`
+
+## 4. Algorithms
+
+Implemented algorithms include:
+
+- hybrid retrieval: vector + keyword + recency + importance + graph boost
+- query rewriting for acronym expansion (`RAG`, `LLM`, etc.)
+- token-budget-aware prompt assembly
+- recursive long-context compression for very large documents
+- memory consolidation lifecycle:
+  - summarize old memory
+  - merge redundant memory
+  - prune low-importance memory
+
+## 5. Evaluation
+
+Evaluation modules:
+
+- `evaluation/long_conversation_test.py`
+- `evaluation/long_document_qa.py`
+- `evaluation/benchmarks.py`
+
+Supported benchmark scenarios:
+
+- 100k-token-scale long document QA (compressed pipeline)
+- 500-turn long conversation recall evaluation
+- knowledge recall after persistent storage
+
+Current repository status:
+
+- tests: `23 passed`
+- coverage: `>= 80%` target maintained
+
+## 6. Demo
+
+Setup:
 
 ```bash
 python -m pip install -e .[dev]
 ```
 
-## Test & Coverage
+Run tests:
 
 ```bash
 python -m pytest -q
 ```
 
-Current status:
-
-- Tests: 20 passed
-- Coverage: 93.03% (`>=80%` target satisfied)
-
-## Run
-
-API server:
-
-```bash
-uvicorn api.app:app --reload
-```
-
-Demo:
+Run demo:
 
 ```bash
 python -m experiments.run_demo
 ```
 
-## API Endpoints
+Run API:
+
+```bash
+uvicorn api.app:app --reload
+```
+
+Key endpoints:
 
 - `GET /health`
 - `POST /memory/write`
@@ -90,11 +125,4 @@ python -m experiments.run_demo
 - `POST /memory/consolidate`
 - `GET /session/history`
 - `GET /benchmark/quick`
-
-## Key Design Docs
-
-- [Architecture](docs/architecture.md)
-- [Roadmap](docs/roadmap.md)
-- [Implementation Status](docs/implementation-status.md)
-- [ADR-0001](docs/adr/0001-memory-hierarchy-and-local-store.md)
 

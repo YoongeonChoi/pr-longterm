@@ -370,3 +370,35 @@ class MemoryStore:
         filtered = [item for item in candidates if str(item.metadata.get(key)) == str(value)]
         filtered.sort(key=lambda item: item.timestamp, reverse=True)
         return filtered[: max(1, limit)]
+
+    def list_older_than(
+        self,
+        cutoff: datetime,
+        memory_type: MemoryType | str | None = None,
+        limit: int = 200,
+    ) -> list[MemoryRecord]:
+        params: list[Any] = [_to_iso(cutoff)]
+        where = "WHERE e.timestamp < ?"
+        if memory_type is not None:
+            mem_type = parse_memory_type(memory_type)
+            where += " AND e.memory_type = ?"
+            params.append(mem_type.value)
+        params.append(max(1, limit))
+        rows = self._conn.execute(
+            f"""
+            SELECT e.*, em.embedding, md.metadata
+            FROM memory_events e
+            LEFT JOIN memory_embeddings em ON em.memory_id = e.memory_id
+            LEFT JOIN memory_metadata md ON md.memory_id = e.memory_id
+            {where}
+            ORDER BY e.timestamp ASC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        return [self._row_to_record(row) for row in rows]
+
+    def delete_memory(self, memory_id: str) -> bool:
+        with self._conn:
+            cursor = self._conn.execute("DELETE FROM memory_events WHERE memory_id = ?", (memory_id,))
+        return cursor.rowcount > 0
